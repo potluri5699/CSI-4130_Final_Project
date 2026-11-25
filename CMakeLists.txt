@@ -4,18 +4,24 @@ project(osm_robot_navigation)
 find_package(ament_cmake REQUIRED)
 
 install(PROGRAMS
-  scripts/route_planner_node.py
+  src/route_planner_node.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME route_planner
 )
 
 install(PROGRAMS
-  scripts/location_gui.py
+  src/location_gui.py
   DESTINATION lib/${PROJECT_NAME}
   RENAME location_gui
 )
 
-install(DIRECTORY launch config
+install(PROGRAMS
+  src/path_follower_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME path_follower
+)
+
+install(DIRECTORY launch rviz urdf audibot_description/meshes
   DESTINATION share/${PROJECT_NAME}
 )
 

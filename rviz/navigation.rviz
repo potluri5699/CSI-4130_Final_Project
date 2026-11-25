@@ -8,6 +8,7 @@ Panels:
         - /Road network1
         - /Planned path1
         - /Route markers1
+        - /Audibot1
       Splitter Ratio: 0.5
     Tree Height: 600
 Visualization Manager:
@@ -67,6 +68,23 @@ Visualization Manager:
         route_start: true
         route_waypoints: true
       Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Collision Enabled: false
+      Description File: ""
+      Description Source: Topic
+      Description Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+      Enabled: true
+      Name: Audibot
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
   Enabled: true
   Global Options:
     Background Color: 35; 35; 35
@@ -82,14 +100,14 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 18000
+      Distance: 60
       Focal Point:
         X: 0
         Y: 0
         Z: 0
       Pitch: 1.1
       Yaw: 0.7
-      Target Frame: <Fixed Frame>
+      Target Frame: base_footprint
 Window Geometry:
   Height: 900
   Width: 1400

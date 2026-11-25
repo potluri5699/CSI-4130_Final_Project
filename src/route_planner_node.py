@@ -123,12 +123,12 @@ class RoutePlanner(Node):
 
     def load_oakland_graph(self):
         if ox is None:
-            raise RuntimeError("OSMnx is not installed. Install it with: python3 -m pip install --user --break-system-packages 'osmnx>=2,<3'")
+            raise RuntimeError("OSMnx is not installed.")
         if self.graph is not None:
             return
 
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        self.publish_status("Loading Oakland County boundary and road network; first download may take several minutes...")
+        self.publish_status("Loading Oakland County boundary and road network...")
         ox.settings.use_cache = True
         ox.settings.log_console = False
         ox.settings.requests_timeout = 180
@@ -199,7 +199,7 @@ class RoutePlanner(Node):
     def request_callback(self, msg):
         try:
             if ox is None:
-                raise RuntimeError("OSMnx import failed. Install it with: python3 -m pip install --user --break-system-packages 'osmnx>=2,<3'")
+                raise RuntimeError("OSMnx import failed.")
             request = json.loads(msg.data)
             start_address = request.get("start", "").strip()
             goal_address = request.get("goal", "").strip()
