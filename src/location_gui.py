@@ -41,8 +41,8 @@ class NavigationWindow(QWidget):
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         subtitle = QLabel("Enter two locations in Oakland County, Michigan.")
 
-        self.start_input = QLineEdit("Troy, Michigan")
-        self.goal_input = QLineEdit("Rochester Hills, Michigan")
+        self.start_input = QLineEdit()
+        self.goal_input = QLineEdit()
         self.start_input.setPlaceholderText("Start address or place")
         self.goal_input.setPlaceholderText("Destination address or place")
 

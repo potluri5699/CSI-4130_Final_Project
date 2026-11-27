@@ -18,6 +18,7 @@ CHILD_FRAME_ID = "base_footprint"
 # Audibot
 WHEELBASE = 2.652
 FRONT_TRACK = 1.638
+REAR_TRACK = 1.6
 WHEEL_RADIUS = 0.36
 MAX_STEER = 0.6
 WHEEL_JOINTS = ("wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr")
@@ -37,6 +38,25 @@ def ackermann_angles(delta):
     right = math.atan(WHEELBASE / (radius + FRONT_TRACK / 2.0))
     clamp = lambda a: max(-MAX_STEER, min(MAX_STEER, a))
     return clamp(left), clamp(right)
+
+
+def wheel_rolling_speeds(speed, yaw_rate, left, right):
+    """Ground speed each wheel rolls at, in WHEEL_JOINTS order.
+
+    Each wheel sits at (x, y) in the rear-axle frame and rolls along its own heading. Its contact
+    velocity is (speed - yaw_rate * y, yaw_rate * x), so inner wheels roll slower and outer or
+    front wheels faster than the chassis speed while turning.
+    """
+    wheels = (
+        (WHEELBASE, FRONT_TRACK / 2.0, left),    # wheel_fl
+        (WHEELBASE, -FRONT_TRACK / 2.0, right),  # wheel_fr
+        (0.0, REAR_TRACK / 2.0, 0.0),            # wheel_rl
+        (0.0, -REAR_TRACK / 2.0, 0.0),           # wheel_rr
+    )
+    return [
+        (speed - yaw_rate * y) * math.cos(phi) + yaw_rate * x * math.sin(phi)
+        for x, y, phi in wheels
+    ]
 
 
 class PurePursuit:
@@ -93,14 +113,14 @@ class PurePursuit:
         self.progress = max(self.progress, best_s)
 
     def step(self, dt, cruise_speed):
-        """Advance the car by dt seconds. Returns (speed, steering angle)."""
+        """Advance the car by dt seconds. Returns (speed, steering angle, yaw rate)."""
         if self.done:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
         self._project()
         remaining = self.length - self.progress
         if remaining <= self.goal_tolerance:
             self.done = True
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
 
         lookahead = max(self.lookahead_min, self.lookahead_time * cruise_speed)
         tx, ty = self.point_at(self.progress + lookahead)
@@ -122,9 +142,10 @@ class PurePursuit:
 
         self.x += speed * math.cos(self.yaw) * dt
         self.y += speed * math.sin(self.yaw) * dt
-        self.yaw += speed / WHEELBASE * math.tan(delta) * dt
+        yaw_rate = speed / WHEELBASE * math.tan(delta)
+        self.yaw += yaw_rate * dt
         self.yaw = math.atan2(math.sin(self.yaw), math.cos(self.yaw))
-        return speed, delta
+        return speed, delta, yaw_rate
 
 
 class PathFollower(Node):
@@ -145,7 +166,7 @@ class PathFollower(Node):
         self.tracker = None
         self.x = self.y = self.yaw = 0.0
         self.steer = 0.0
-        self.wheel_angle = 0.0
+        self.wheel_angles = [0.0] * len(WHEEL_JOINTS)
         self.distance = 0.0
         self.goal_reported = True
         self.last_time = self.get_clock().now()
@@ -184,12 +205,15 @@ class PathFollower(Node):
             steps = max(1, int(math.ceil(sim_dt / MAX_SUBSTEP)))
             h = sim_dt / steps
             for _ in range(steps):
-                speed, self.steer = self.tracker.step(h, cruise)
-                self.wheel_angle += speed * h / WHEEL_RADIUS
+                speed, self.steer, yaw_rate = self.tracker.step(h, cruise)
+                left, right = ackermann_angles(self.steer)
+                rolls = wheel_rolling_speeds(speed, yaw_rate, left, right)
+                for i, roll in enumerate(rolls):
+                    self.wheel_angles[i] += roll * h / WHEEL_RADIUS
                 self.distance += speed * h
                 if self.tracker.done:
                     break
-            self.wheel_angle = math.remainder(self.wheel_angle, 2.0 * math.pi)
+            self.wheel_angles = [math.remainder(a, 2.0 * math.pi) for a in self.wheel_angles]
             self.x, self.y, self.yaw = self.tracker.x, self.tracker.y, self.tracker.yaw
 
         if self.tracker is not None and self.tracker.done and not self.goal_reported:
@@ -214,7 +238,7 @@ class PathFollower(Node):
         joints = JointState()
         joints.header.stamp = stamp
         joints.name = list(WHEEL_JOINTS) + list(STEER_JOINTS)
-        joints.position = [self.wheel_angle] * len(WHEEL_JOINTS) + [left, right]
+        joints.position = list(self.wheel_angles) + [left, right]
         self.joint_pub.publish(joints)
 
 

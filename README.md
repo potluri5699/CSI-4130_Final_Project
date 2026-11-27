@@ -122,7 +122,7 @@ ros2 launch osm_robot_navigation navigation.launch.py blue:=false speed:=20.0 ti
 
 The RViz camera follows `base_footprint` from ~60 m away. Scroll out to see the whole road network.
 
-Default GUI locations are Troy, Michigan and Rochester Hills, Michigan. Both can be edited.
+The GUI starts with empty start and destination fields. Enter both before submitting.
 
 ## 6. ROS interfaces
 
