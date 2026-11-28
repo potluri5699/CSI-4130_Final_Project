@@ -20,7 +20,9 @@ WHEELBASE = 2.652
 FRONT_TRACK = 1.638
 REAR_TRACK = 1.6
 WHEEL_RADIUS = 0.36
-MAX_STEER = 0.6
+MAX_STEER = 0.6  # steering limit of each front wheel (matches the URDF joint limit)
+MAX_DELTA = math.atan(1.0 / (1.0 / math.tan(MAX_STEER) + FRONT_TRACK / (2.0 * WHEELBASE)))
+MAX_STEER_RATE = 1.0  # rad/s: how fast the steering actuator can turn the bicycle-model angle
 WHEEL_JOINTS = ("wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr")
 STEER_JOINTS = ("steer_fl", "steer_fr")
 MAX_SUBSTEP = 0.02  # seconds of simulated time per integration step
@@ -36,8 +38,7 @@ def ackermann_angles(delta):
     radius = WHEELBASE / math.tan(delta)
     left = math.atan(WHEELBASE / (radius - FRONT_TRACK / 2.0))
     right = math.atan(WHEELBASE / (radius + FRONT_TRACK / 2.0))
-    clamp = lambda a: max(-MAX_STEER, min(MAX_STEER, a))
-    return clamp(left), clamp(right)
+    return left, right
 
 
 def wheel_rolling_speeds(speed, yaw_rate, left, right):
@@ -84,6 +85,7 @@ class PurePursuit:
             self.yaw = 0.0
         self.segment = 0
         self.progress = 0.0
+        self.delta = 0.0  # actual bicycle-model steering angle (rate-limited)
         self.done = len(pts) < 2
 
     def point_at(self, s):
@@ -128,11 +130,15 @@ class PurePursuit:
         dist = max(math.hypot(dx, dy), 1e-6)
         alpha = math.atan2(math.sin(math.atan2(dy, dx) - self.yaw), math.cos(math.atan2(dy, dx) - self.yaw))
         if abs(alpha) > math.pi / 2.0:
-            # Target is behind the car: turn as hard as possible toward it.
-            delta = math.copysign(MAX_STEER, alpha)
+            target = math.copysign(MAX_DELTA, alpha)
         else:
-            delta = math.atan(WHEELBASE * 2.0 * math.sin(alpha) / dist)
-        delta = max(-MAX_STEER, min(MAX_STEER, delta))
+            target = math.atan(WHEELBASE * 2.0 * math.sin(alpha) / dist)
+        target = max(-MAX_DELTA, min(MAX_DELTA, target))
+
+        # The car drives on the steering angle the wheels actually have, which can only move at MAX_STEER_RATE.
+        max_change = MAX_STEER_RATE * dt
+        self.delta += max(-max_change, min(max_change, target - self.delta))
+        delta = self.delta
 
         speed = cruise_speed
         curvature = abs(math.tan(delta)) / WHEELBASE
@@ -153,9 +159,9 @@ class PathFollower(Node):
         super().__init__("audibot_path_follower")
         self.declare_parameter("speed", 15.0)
         self.declare_parameter("time_scale", 1.0)
-        self.declare_parameter("rate", 30.0)
-        self.declare_parameter("lookahead_min", 6.0)
-        self.declare_parameter("lookahead_time", 0.8)
+        self.declare_parameter("tick_period", 0.03)
+        self.declare_parameter("lookahead_min", 4.0)
+        self.declare_parameter("lookahead_time", 0.3)
         self.declare_parameter("max_lateral_accel", 3.0)
         self.declare_parameter("goal_tolerance", 1.0)
 
@@ -170,8 +176,7 @@ class PathFollower(Node):
         self.distance = 0.0
         self.goal_reported = True
         self.last_time = self.get_clock().now()
-        rate = float(self.get_parameter("rate").value)
-        self.timer = self.create_timer(1.0 / rate, self.tick)
+        self.timer = self.create_timer(float(self.get_parameter("tick_period").value), self.tick)
         self.get_logger().info("Audibot path follower ready. Waiting on /planned_path.")
 
     def path_callback(self, msg):
@@ -201,7 +206,7 @@ class PathFollower(Node):
 
         if self.tracker is not None and not self.tracker.done and elapsed > 0.0:
             cruise = float(self.get_parameter("speed").value)
-            sim_dt = min(elapsed, 0.5) * float(self.get_parameter("time_scale").value)
+            sim_dt = min(elapsed * float(self.get_parameter("time_scale").value), 0.5)
             steps = max(1, int(math.ceil(sim_dt / MAX_SUBSTEP)))
             h = sim_dt / steps
             for _ in range(steps):

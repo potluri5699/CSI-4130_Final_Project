@@ -52,15 +52,19 @@ def haversine_m(lon1, lat1, lon2, lat2):
 
 
 def astar_road_graph(graph, start, goal):
-    """A* over a directed OSMnx MultiDiGraph using edge length in meters."""
+    """A* over a directed OSMnx MultiDiGraph using edge length in meters.
+
+    Returns (route, distance_m, expanded, edges) where edges[i] is the shortest edge
+    data dict between route[i] and route[i + 1]; it carries the curved "geometry".
+    """
     adjacency = {}
     for u, v, data in graph.edges(data=True):
         length = float(data.get("length", 1.0))
         if length < 0:
             continue
         old = adjacency.setdefault(u, {}).get(v)
-        if old is None or length < old:
-            adjacency[u][v] = length
+        if old is None or length < old[0]:
+            adjacency[u][v] = (length, data)
 
     def heuristic(node):
         a, b = graph.nodes[node], graph.nodes[goal]
@@ -82,10 +86,11 @@ def astar_road_graph(graph, start, goal):
                 current = came_from[current]
                 route.append(current)
             route.reverse()
-            return route, g_score[goal], len(closed) + 1
+            edges = [adjacency[a][b][1] for a, b in zip(route, route[1:])]
+            return route, g_score[goal], len(closed) + 1, edges
 
         closed.add(current)
-        for neighbor, edge_length in adjacency.get(current, {}).items():
+        for neighbor, (edge_length, _) in adjacency.get(current, {}).items():
             tentative = g_score[current] + edge_length
             if tentative < g_score.get(neighbor, float("inf")):
                 came_from[neighbor] = current
@@ -100,9 +105,14 @@ class RoutePlanner(Node):
         super().__init__("osm_astar_route_planner")
         self.request_sub = self.create_subscription(String, "/route_request", self.request_callback, 10)
         self.status_pub = self.create_publisher(String, "/route_status", 10)
-        self.path_pub = self.create_publisher(Path, "/planned_path", 10)
+        self.path_pub = self.create_publisher(
+            Path, "/planned_path",
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.marker_pub = self.create_publisher(
             Marker, "/road_network",
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self.route_line_pub = self.create_publisher(
+            Marker, "/route_line",
             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.markers_pub = self.create_publisher(MarkerArray, "/route_markers", 10)
         self.graph = None
@@ -220,25 +230,42 @@ class RoutePlanner(Node):
             start_node = ox.distance.nearest_nodes(self.graph, X=start_lon, Y=start_lat)
             goal_node = ox.distance.nearest_nodes(self.graph, X=goal_lon, Y=goal_lat)
             self.publish_status("Running A* shortest-distance search...")
-            route, distance_m, expanded = astar_road_graph(self.graph, start_node, goal_node)
-            self.publish_route(route)
+            route, distance_m, expanded, edges = astar_road_graph(self.graph, start_node, goal_node)
+            self.publish_route(route, edges)
             self.publish_status("SUCCESS | Route: %.2f km | Nodes in route: %d | A* expanded: %d" %
                                 (distance_m / 1000.0, len(route), expanded))
         except Exception as exc:
             self.get_logger().error("Route request failed: %s\n%s" % (exc, traceback.format_exc()))
             self.publish_status("ERROR | " + str(exc))
 
-    def node_xy(self, node_id):
-        node = self.graph.nodes[node_id]
-        east, north = self.transformer.transform(float(node["x"]), float(node["y"]))
+    def lonlat_xy(self, lon, lat):
+        east, north = self.transformer.transform(float(lon), float(lat))
         return east - self.origin_x, north - self.origin_y
 
-    def publish_route(self, route):
+    def node_xy(self, node_id):
+        node = self.graph.nodes[node_id]
+        return self.lonlat_xy(node["x"], node["y"])
+
+    def route_xy(self, route, edges):
+        """Dense map-frame polyline: each road's curve geometry between its two intersections."""
+        xy = [self.node_xy(route[0])]
+        for node_id, data in zip(route[1:], edges):
+            if "geometry" in data:
+                # OSMnx stores edge geometry from u to v; the endpoints equal the nodes, so skip them.
+                xy.extend(self.lonlat_xy(lon, lat) for lon, lat in list(data["geometry"].coords)[1:-1])
+            xy.append(self.node_xy(node_id))
+        deduped = [xy[0]]
+        for x, y in xy[1:]:
+            if math.hypot(x - deduped[-1][0], y - deduped[-1][1]) > 1e-3:
+                deduped.append((x, y))
+        return deduped
+
+    def publish_route(self, route, edges):
         now = self.get_clock().now().to_msg()
         path = Path()
         path.header.frame_id = FRAME_ID
         path.header.stamp = now
-        xy = [self.node_xy(node_id) for node_id in route]
+        xy = self.route_xy(route, edges)
 
         for index, (x, y) in enumerate(xy):
             pose = PoseStamped()
@@ -258,6 +285,16 @@ class RoutePlanner(Node):
             pose.pose.orientation.w = math.cos(yaw / 2.0)
             path.poses.append(pose)
         self.path_pub.publish(path)
+
+        line = Marker()
+        line.header.frame_id, line.header.stamp = FRAME_ID, now
+        line.ns, line.id = "planned_route", 0
+        line.type, line.action = Marker.LINE_STRIP, Marker.ADD
+        line.pose.orientation.w = 1.0
+        line.scale.x = 2.0
+        line.color = ColorRGBA(r=1.0, g=0.55, b=0.0, a=1.0)
+        line.points = [Point(x=x, y=y, z=0.12) for x, y in xy]
+        self.route_line_pub.publish(line)
 
         array = MarkerArray()
         start = Marker()

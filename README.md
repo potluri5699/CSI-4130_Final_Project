@@ -132,6 +132,7 @@ The GUI starts with empty start and destination fields. Enter both before submit
 | `/route_status` | `std_msgs/msg/String` | Progress, success or error message |
 | `/planned_path` | `nav_msgs/msg/Path` | Ordered A* route poses |
 | `/road_network` | `visualization_msgs/msg/Marker` | Sampled OSM road network as line segments |
+| `/route_line` | `visualization_msgs/msg/Marker` | Planned route drawn as an orange line above the road network |
 | `/route_markers` | `visualization_msgs/msg/MarkerArray` | Start, goal and intermediate waypoints |
 | `/joint_states` | `sensor_msgs/msg/JointState` | Audibot wheel spin and steering angles from `path_follower` |
 | `/tf` | `tf2_msgs/msg/TFMessage` | `map -> base_footprint` from `path_follower`, vehicle links from `robot_state_publisher` |
@@ -153,7 +154,7 @@ ros2 topic echo /planned_path --once
 - A* searches the directed road graph. Edge costs are OSM road lengths in meters; the heuristic is straight-line haversine distance in meters.
 - The route node coordinates are projected to UTM zone 17N, then shifted relative to the Oakland County centroid to create a local `map` frame suitable for RViz.
 - The node publishes the path and visualization markers.
-- `path_follower` tracks the path with pure pursuit: it picks a point `max(6 m, 0.8 s x speed)` ahead on the route, steers with `delta = atan(2 L sin(alpha) / Ld)` (L = 2.652 m wheelbase, clamped to +/-0.6 rad), limits speed to keep lateral acceleration under 3 m/s^2, and brakes before the goal. Front wheel angles use Ackermann geometry.
+- `path_follower` tracks the path with pure pursuit: it picks a point `max(4 m, 0.3 s x speed)` ahead on the route, steers with `delta = atan(2 L sin(alpha) / Ld)` (L = 2.652 m wheelbase, clamped to +/-0.514 rad so the inner front wheel stays within its 0.6 rad limit), limits speed to keep lateral acceleration under 3 m/s^2, and brakes before the goal. Front wheel angles use Ackermann geometry.
 
 
 <img width="840" height="1848" alt="OSM_Robot_Navigation_Flowchart" src="https://github.com/user-attachments/assets/80ff67d4-74e2-4346-828e-28d3fe739431" />
